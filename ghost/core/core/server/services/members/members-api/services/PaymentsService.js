@@ -11,22 +11,22 @@ class PaymentsService {
      * @param {object} deps
      * @param {import('bookshelf').Model} deps.Offer
      * @param {import('../../../offers/application/OffersAPI')} deps.offersAPI
-     * @param {import('../../../stripe/StripeAPI')} deps.stripeAPIService
+     * @param {import('../../../dodo/DodoAPI')} deps.dodoAPIService - CHANGED from stripeAPIService
      * @param {{get(key: string): any}} deps.settingsCache
      */
     constructor(deps) {
         /** @private */
         this.OfferModel = deps.Offer;
         /** @private */
-        this.StripeProductModel = deps.StripeProduct;
+        this.DodoProductModel = deps.DodoProduct; // CHANGED from StripeProductModel
         /** @private */
-        this.StripePriceModel = deps.StripePrice;
+        this.DodoPriceModel = deps.DodoPrice; // CHANGED from StripePriceModel
         /** @private */
-        this.StripeCustomerModel = deps.StripeCustomer;
+        this.DodoCustomerModel = deps.DodoCustomer; // CHANGED from StripeCustomerModel
         /** @private */
         this.offersAPI = deps.offersAPI;
         /** @private */
-        this.stripeAPIService = deps.stripeAPIService;
+        this.dodoAPIService = deps.dodoAPIService; // CHANGED from stripeAPIService
         /** @private */
         this.settingsCache = deps.settingsCache;
 
@@ -108,7 +108,8 @@ class PaymentsService {
             data.customerEmail = email;
         }
 
-        const session = await this.stripeAPIService.createCheckoutSession(price.id, customer, data);
+        // CHANGED: Use Dodo API instead of Stripe
+        const session = await this.dodoAPIService.createCheckoutSession(price.id, customer, data);
 
         return session.url;
     }
@@ -138,21 +139,23 @@ class PaymentsService {
             customer,
             customerEmail: !customer && email ? email : null,
             personalNote: personalNote
-
         };
 
-        const session = await this.stripeAPIService.createDonationCheckoutSession(data);
+        // CHANGED: Use Dodo API instead of Stripe
+        const session = await this.dodoAPIService.createDonationCheckoutSession(data);
         return session.url;
     }
 
     async getCustomerForMember(member) {
-        const rows = await this.StripeCustomerModel.where({
+        // CHANGED: Query Dodo customers instead of Stripe customers
+        const rows = await this.DodoCustomerModel.where({
             member_id: member.id
         }).query().select('customer_id');
 
         for (const row of rows) {
             try {
-                const customer = await this.stripeAPIService.getCustomer(row.customer_id);
+                // CHANGED: Use Dodo API instead of Stripe
+                const customer = await this.dodoAPIService.getCustomer(row.customer_id);
                 if (!customer.deleted) {
                     return customer;
                 }
@@ -167,12 +170,14 @@ class PaymentsService {
     }
 
     async createCustomerForMember(member) {
-        const customer = await this.stripeAPIService.createCustomer({
+        // CHANGED: Use Dodo API instead of Stripe
+        const customer = await this.dodoAPIService.createCustomer({
             email: member.get('email'),
             name: member.get('name')
         });
 
-        await this.StripeCustomerModel.add({
+        // CHANGED: Save to Dodo customers table instead of Stripe
+        await this.DodoCustomerModel.add({
             member_id: member.id,
             customer_id: customer.id,
             email: customer.email,
@@ -187,14 +192,16 @@ class PaymentsService {
      * @returns {Promise<{id: string}>}
      */
     async getProductForTier(tier) {
-        const rows = await this.StripeProductModel
+        // CHANGED: Query Dodo products instead of Stripe products
+        const rows = await this.DodoProductModel
             .where({product_id: tier.id.toHexString()})
             .query()
-            .select('stripe_product_id');
+            .select('dodo_product_id'); // CHANGED column name
 
         for (const row of rows) {
             try {
-                const product = await this.stripeAPIService.getProduct(row.stripe_product_id);
+                // CHANGED: Use Dodo API instead of Stripe
+                const product = await this.dodoAPIService.getProduct(row.dodo_product_id);
                 if (product.active) {
                     return {id: product.id};
                 }
@@ -212,13 +219,16 @@ class PaymentsService {
 
     /**
      * @param {import('../../../tiers/Tier')} tier
-     * @returns {Promise<import('stripe').default.Product>}
+     * @returns {Promise<{id: string, name: string}>}
      */
     async createProductForTier(tier) {
-        const product = await this.stripeAPIService.createProduct({name: tier.name});
-        await this.StripeProductModel.add({
+        // CHANGED: Use Dodo API instead of Stripe
+        const product = await this.dodoAPIService.createProduct({name: tier.name});
+        
+        // CHANGED: Save to Dodo products table
+        await this.DodoProductModel.add({
             product_id: tier.id.toHexString(),
-            stripe_product_id: product.id
+            dodo_product_id: product.id // CHANGED column name
         });
         return product;
     }
@@ -228,13 +238,15 @@ class PaymentsService {
      * @returns {Promise<void>}
      */
     async updateNameForTierProducts(tier) {
-        const rows = await this.StripeProductModel
+        // CHANGED: Query Dodo products instead of Stripe products
+        const rows = await this.DodoProductModel
             .where({product_id: tier.id.toHexString()})
             .query()
-            .select('stripe_product_id');
+            .select('dodo_product_id'); // CHANGED column name
 
         for (const row of rows) {
-            await this.stripeAPIService.updateProduct(row.stripe_product_id, {
+            // CHANGED: Use Dodo API instead of Stripe
+            await this.dodoAPIService.updateProduct(row.dodo_product_id, {
                 name: tier.name
             });
         }
@@ -244,28 +256,31 @@ class PaymentsService {
      * @returns {Promise<{id: string}>}
      */
     async getProductForDonations({name}) {
-        const existingDonationPrices = await this.StripePriceModel
+        // CHANGED: Query Dodo prices instead of Stripe prices
+        const existingDonationPrices = await this.DodoPriceModel
             .where({
                 type: 'donation'
             })
             .query()
-            .select('stripe_product_id');
+            .select('dodo_product_id'); // CHANGED column name
 
         for (const row of existingDonationPrices) {
-            const product = await this.StripeProductModel
+            // CHANGED: Query Dodo products instead of Stripe products
+            const product = await this.DodoProductModel
                 .where({
-                    stripe_product_id: row.stripe_product_id
+                    dodo_product_id: row.dodo_product_id // CHANGED column name
                 })
                 .query()
-                .select('stripe_product_id')
+                .select('dodo_product_id') // CHANGED column name
                 .first();
 
             if (product) {
-                // Check active in Stripe
+                // Check active in Dodo
                 try {
-                    const stripeProduct = await this.stripeAPIService.getProduct(row.stripe_product_id);
-                    if (stripeProduct.active) {
-                        return {id: stripeProduct.id};
+                    // CHANGED: Use Dodo API instead of Stripe
+                    const dodoProduct = await this.dodoAPIService.getProduct(row.dodo_product_id);
+                    if (dodoProduct.active) {
+                        return {id: dodoProduct.id};
                     }
                 } catch (err) {
                     logging.warn(err);
@@ -281,7 +296,7 @@ class PaymentsService {
     }
 
     /**
-     * Stripe's nickname field is limited to 250 characters
+     * Dodo's nickname field equivalent
      * @returns {string}
      */
     getDonationPriceNickname() {
@@ -297,11 +312,11 @@ class PaymentsService {
         const currency = this.settingsCache.get('donations_currency');
         const suggestedAmount = this.settingsCache.get('donations_suggested_amount');
 
-        // Stripe requires a minimum charge amount
-        // @see https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts
+        // Dodo requires minimum charge amount (similar to Stripe)
         const amount = suggestedAmount && suggestedAmount >= 100 ? suggestedAmount : 0;
 
-        const price = await this.StripePriceModel
+        // CHANGED: Query Dodo prices instead of Stripe prices
+        const price = await this.DodoPriceModel
             .where({
                 type: 'donation',
                 active: true,
@@ -309,23 +324,25 @@ class PaymentsService {
                 currency
             })
             .query()
-            .select('stripe_price_id', 'stripe_product_id', 'id', 'nickname')
+            .select('dodo_price_id', 'dodo_product_id', 'id', 'nickname') // CHANGED column names
             .first();
 
         if (price) {
             if (price.nickname !== nickname) {
-                // Rename it in Stripe (in case the publication name changed)
+                // Rename it in Dodo (in case the publication name changed)
                 try {
-                    await this.stripeAPIService.updatePrice(price.stripe_price_id, {
+                    // CHANGED: Use Dodo API instead of Stripe
+                    await this.dodoAPIService.updatePrice(price.dodo_price_id, {
                         nickname
                     });
 
                     // Update product too
-                    await this.stripeAPIService.updateProduct(price.stripe_product_id, {
+                    await this.dodoAPIService.updateProduct(price.dodo_product_id, {
                         name: nickname
                     });
 
-                    await this.StripePriceModel.edit({
+                    // CHANGED: Update Dodo price model
+                    await this.DodoPriceModel.edit({
                         nickname
                     }, {id: price.id});
                 } catch (err) {
@@ -333,7 +350,7 @@ class PaymentsService {
                 }
             }
             return {
-                id: price.stripe_price_id
+                id: price.dodo_price_id // CHANGED column name
             };
         }
 
@@ -348,15 +365,15 @@ class PaymentsService {
     }
 
     /**
-     * @returns {Promise<import('stripe').default.Price>}
+     * @returns {Promise<{id: string}>}
      */
     async createPriceForDonations({currency, amount, nickname}) {
         const product = await this.getProductForDonations({name: nickname});
 
         const preset = amount ? amount : undefined;
 
-        // Create the price in Stripe
-        const price = await this.stripeAPIService.createPrice({
+        // CHANGED: Create the price in Dodo instead of Stripe
+        const price = await this.dodoAPIService.createPrice({
             currency,
             product: product.id,
             custom_unit_amount: {
@@ -368,10 +385,10 @@ class PaymentsService {
             active: true
         });
 
-        // Save it to the database
-        await this.StripePriceModel.add({
-            stripe_price_id: price.id,
-            stripe_product_id: product.id,
+        // CHANGED: Save to Dodo prices table
+        await this.DodoPriceModel.add({
+            dodo_price_id: price.id, // CHANGED column name
+            dodo_product_id: product.id, // CHANGED column name
             active: price.active,
             nickname: price.nickname,
             currency: price.currency,
@@ -383,16 +400,18 @@ class PaymentsService {
     }
 
     /**
-     * @returns {Promise<import('stripe').default.Product>}
+     * @returns {Promise<{id: string, name: string}>}
      */
     async createProductForDonations({name}) {
-        const product = await this.stripeAPIService.createProduct({
+        // CHANGED: Use Dodo API instead of Stripe
+        const product = await this.dodoAPIService.createProduct({
             name
         });
 
-        await this.StripeProductModel.add({
+        // CHANGED: Save to Dodo products table
+        await this.DodoProductModel.add({
             product_id: null,
-            stripe_product_id: product.id
+            dodo_product_id: product.id // CHANGED column name
         });
         return product;
     }
@@ -406,30 +425,33 @@ class PaymentsService {
         const product = await this.getProductForTier(tier);
         const currency = tier.currency.toLowerCase();
         const amount = tier.getPrice(cadence);
-        const rows = await this.StripePriceModel.where({
-            stripe_product_id: product.id,
+        
+        // CHANGED: Query Dodo prices instead of Stripe prices
+        const rows = await this.DodoPriceModel.where({
+            dodo_product_id: product.id, // CHANGED column name
             currency,
             interval: cadence,
             amount,
             active: true,
             type: 'recurring'
-        }).query().select('id', 'stripe_price_id');
+        }).query().select('id', 'dodo_price_id'); // CHANGED column name
 
         for (const row of rows) {
             try {
-                const price = await this.stripeAPIService.getPrice(row.stripe_price_id);
+                // CHANGED: Use Dodo API instead of Stripe
+                const price = await this.dodoAPIService.getPrice(row.dodo_price_id);
                 if (price.active && price.currency.toLowerCase() === currency && price.unit_amount === amount && price.recurring?.interval === cadence) {
                     return {
                         id: price.id
                     };
                 } else {
-                    // Update the database model to prevent future Stripe fetches when it is not needed
-                    await this.StripePriceModel.edit({
+                    // Update the database model to prevent future Dodo fetches when it is not needed
+                    await this.DodoPriceModel.edit({
                         active: !!price.active
                     }, {id: row.id});
                 }
             } catch (err) {
-                logging.error(`Failed to lookup Stripe Price ${row.stripe_price_id}`);
+                logging.error(`Failed to lookup Dodo Price ${row.dodo_price_id}`);
                 logging.error(err);
             }
         }
@@ -444,11 +466,13 @@ class PaymentsService {
     /**
      * @param {import('../../../tiers/Tier')} tier
      * @param {'month'|'year'} cadence
-     * @returns {Promise<import('stripe').default.Price>}
+     * @returns {Promise<{id: string}>}
      */
     async createPriceForTierCadence(tier, cadence) {
         const product = await this.getProductForTier(tier);
-        const price = await this.stripeAPIService.createPrice({
+        
+        // CHANGED: Use Dodo API instead of Stripe
+        const price = await this.dodoAPIService.createPrice({
             product: product.id,
             interval: cadence,
             currency: tier.currency,
@@ -457,9 +481,11 @@ class PaymentsService {
             type: 'recurring',
             active: true
         });
-        await this.StripePriceModel.add({
-            stripe_price_id: price.id,
-            stripe_product_id: product.id,
+        
+        // CHANGED: Save to Dodo prices table
+        await this.DodoPriceModel.add({
+            dodo_price_id: price.id, // CHANGED column name
+            dodo_product_id: product.id, // CHANGED column name
             active: price.active,
             nickname: price.nickname,
             currency: price.currency,
@@ -476,17 +502,18 @@ class PaymentsService {
      * @returns {Promise<{id: string}>}
      */
     async getCouponForOffer(offerId) {
-        const row = await this.OfferModel.where({id: offerId}).query().select('stripe_coupon_id', 'discount_type').first();
+        // CHANGED: Look for dodo_coupon_id instead of stripe_coupon_id
+        const row = await this.OfferModel.where({id: offerId}).query().select('dodo_coupon_id', 'discount_type').first();
         if (!row || row.discount_type === 'trial') {
             return null;
         }
-        if (!row.stripe_coupon_id) {
+        if (!row.dodo_coupon_id) {
             const offer = await this.offersAPI.getOffer({id: offerId});
             await this.createCouponForOffer(offer);
             return this.getCouponForOffer(offerId);
         }
         return {
-            id: row.stripe_coupon_id
+            id: row.dodo_coupon_id // CHANGED column name
         };
     }
 
@@ -494,7 +521,7 @@ class PaymentsService {
      * @param {import('@tryghost/members-offers/lib/application/OfferMapper').OfferDTO} offer
      */
     async createCouponForOffer(offer) {
-        /** @type {import('stripe').Stripe.CouponCreateParams} */
+        /** @type {object} */
         const couponData = {
             name: offer.name,
             duration: offer.duration
@@ -511,10 +538,12 @@ class PaymentsService {
             couponData.currency = offer.currency;
         }
 
-        const coupon = await this.stripeAPIService.createCoupon(couponData);
+        // CHANGED: Use Dodo API instead of Stripe
+        const coupon = await this.dodoAPIService.createCoupon(couponData);
 
+        // CHANGED: Save dodo_coupon_id instead of stripe_coupon_id
         await this.OfferModel.edit({
-            stripe_coupon_id: coupon.id
+            dodo_coupon_id: coupon.id // CHANGED column name
         }, {
             id: offer.id
         });
